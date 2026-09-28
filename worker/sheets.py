@@ -20,16 +20,34 @@ def spreadsheet_id() -> str:
     return os.environ["SPREADSHEET_ID"]
 
 
-def _sheet_id(service, tab: str) -> int:
-    """Numeric sheetId, needed for grid operations (title is not accepted)."""
+def _sheet_props(service, tab: str) -> dict:
+    """The tab's properties, including its grid width."""
     meta = service.spreadsheets().get(
-        spreadsheetId=spreadsheet_id(), fields="sheets.properties(sheetId,title)",
+        spreadsheetId=spreadsheet_id(),
+        fields="sheets.properties(sheetId,title,gridProperties)",
     ).execute()
     for entry in meta.get("sheets", []):
         props = entry.get("properties", {})
         if props.get("title") == tab:
-            return props["sheetId"]
+            return props
     raise ValueError(f"tab not found: {tab}")
+
+
+def _sheet_id(service, tab: str) -> int:
+    """Numeric sheetId, needed for grid operations (title is not accepted)."""
+    return _sheet_props(service, tab)["sheetId"]
+
+
+def _grid_width(service, tab: str) -> int:
+    """How many columns the tab physically has.
+
+    This is NOT len(header): the values API omits trailing empty cells, so a
+    6-column sheet whose header row has 3 entries reports a header of length 3.
+    Sizing the widening from the header length appends columns nobody asked
+    for, and those extra columns cannot have headers — the one outcome the
+    operator's rule forbids.
+    """
+    return int(_sheet_props(service, tab).get("gridProperties", {}).get("columnCount", 0))
 
 
 def read_rows(service, tab: str) -> list[list[str]]:
@@ -98,32 +116,43 @@ def _a1_tab(tab: str) -> str:
 def ensure_columns(service, tab: str, header: list[str], mapping: dict) -> None:
     """Add any missing mapped columns AND write their headers.
 
-    A column with no header is not a valid outcome, so every column this
-    function physically creates gets its header written in the same run. The
-    grid is widened ONCE to the highest missing index, then a header is
-    written for every mapped column at or beyond the original width — writing
-    headers only for columns above the running width would silently create a
-    bare column whenever the mapping is not in ascending order.
+    A column with no header is not a valid outcome, so every mapped column
+    that lacks a header gets one in the same run. The grid is widened ONCE to
+    the highest missing index, then a header is written for every mapped
+    column that is missing one — writing headers only for columns above the
+    running width would silently leave a bare column whenever the mapping is
+    not in ascending order.
+
+    "Missing" is judged against the header row, not the grid width: a mapped
+    column can sit inside a wide grid and still be empty (D and E were exactly
+    that in production). But the WIDENING is sized from the tab's grid, not
+    from len(header): the values API omits trailing empty cells, so a
+    6-column sheet with a 3-entry header row would otherwise be widened by
+    three columns, two of them bare.
     """
-    width = len(header or [])
+    header = header or []
+    present = {i for i, text in enumerate(header) if str(text).strip()}
+    width = max(_grid_width(service, tab), len(header))
     targets = []
     for key, header_text in PROVISION_HEADERS.items():
         idx = col_to_index(mapping.get(key, ""))
         if idx >= 0:
             targets.append((idx, header_text))
-    missing = sorted((idx, text) for idx, text in targets if idx >= width)
+    missing = sorted((idx, text) for idx, text in targets if idx not in present)
     if not missing:
-        return  # every mapped column already exists
+        return  # every mapped column already has its header
 
     sheet_id = _sheet_id(service, tab)
-    service.spreadsheets().batchUpdate(
-        spreadsheetId=spreadsheet_id(),
-        body={"requests": [{"appendDimension": {
-            "sheetId": sheet_id,
-            "dimension": "COLUMNS",
-            "length": missing[-1][0] + 1 - width,
-        }}]},
-    ).execute()
+    grow = missing[-1][0] + 1 - width
+    if grow > 0:
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id(),
+            body={"requests": [{"appendDimension": {
+                "sheetId": sheet_id,
+                "dimension": "COLUMNS",
+                "length": grow,
+            }}]},
+        ).execute()
 
     quoted = _a1_tab(tab)
     service.spreadsheets().values().batchUpdate(

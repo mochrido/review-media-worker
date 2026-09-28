@@ -212,3 +212,93 @@ def test_write_statuses_asks_the_client_to_retry():
 
     write_statuses(Svc(), "Sheet1", 5, {2: "DONE"})
     assert seen.get("num_retries") == 3
+
+
+class _GridFake:
+    """A service whose data tab has a real grid width, as the API reports it.
+
+    The values API omits trailing empty cells, so a 5-column grid whose header
+    row holds 3 entries reports a header of length 3. The grid width is a
+    separate number and is what the widening must be sized from.
+    """
+
+    def __init__(self, grid_width):
+        self._grid_width = grid_width
+        self.written = []
+        self.appended = []
+
+    def spreadsheets(self):
+        outer = self
+
+        class _S:
+            def get(self_inner, **kwargs):
+                return _Req({"sheets": [{"properties": {
+                    "sheetId": 7, "title": "Sheet1",
+                    "gridProperties": {"columnCount": outer._grid_width},
+                }}]})
+
+            def batchUpdate(self_inner, **kwargs):
+                reqs = kwargs["body"]["requests"]
+                for r in reqs:
+                    if "appendDimension" in r:
+                        outer.appended.append(r["appendDimension"]["length"])
+                return _Req({})
+
+            def values(self_inner):
+                class _V:
+                    def batchUpdate(self_v, **kwargs):
+                        for d in kwargs["body"]["data"]:
+                            outer.written.append((d["range"], d["values"]))
+                        return _Req({})
+                return _V()
+
+        return _S()
+
+    def appended_lengths(self):
+        return self.appended
+
+
+class _Req:
+    def __init__(self, result=None):
+        self._result = result or {}
+
+    def execute(self, **kwargs):
+        return self._result
+
+
+def test_ensure_columns_does_not_create_bare_columns_when_the_grid_is_wider_than_the_header():
+    # Real case: the sheet's grid was 5 columns wide but its header row had only
+    # 3 entries (the values API omits trailing empties). Sizing the widening from
+    # the header length appended 3 columns instead of 1, leaving G1 and H1 with
+    # no header — the one outcome that is never acceptable.
+    forged = _GridFake(grid_width=5)
+    ensure_columns(forged, "Sheet1", ["username", "image_path", "video_path"], dict(DEFAULT_MAPPING))
+
+    assert forged.appended_lengths() == [1], \
+        f"expected exactly one column added, added {forged.appended_lengths()}"
+
+    headed = {r.split("!")[-1] for r, _ in forged.written}
+    assert headed == {"D1", "E1", "F1"}, headed
+    assert "G1" not in headed and "H1" not in headed, "no column may be left bare"
+
+
+def test_ensure_columns_heads_a_mapping_inside_a_wide_grid_without_widening_it():
+    # A 6-column grid whose header row has 3 entries: D/E/F exist as empty
+    # columns but have no headers. They must be headed, and because the grid is
+    # already wide enough, nothing may be appended (an append of length 0 is
+    # rejected by the API).
+    forged = _GridFake(grid_width=6)
+    ensure_columns(forged, "Sheet1", ["username", "image_path", "video_path"], dict(DEFAULT_MAPPING))
+
+    assert forged.appended_lengths() == [], "the grid is wide enough; nothing to append"
+    headed = {r.split("!")[-1] for r, _ in forged.written}
+    assert headed == {"D1", "E1", "F1"}, headed
+
+
+def test_ensure_columns_is_a_true_no_op_when_every_mapped_column_is_headed():
+    forged = _GridFake(grid_width=6)
+    ensure_columns(forged, "Sheet1",
+                   ["username", "image_path", "video_path",
+                    "image_folder", "video_folder", "status"], dict(DEFAULT_MAPPING))
+    assert forged.appended_lengths() == []
+    assert forged.written == [], "nothing to do when every header is present"
