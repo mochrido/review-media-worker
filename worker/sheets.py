@@ -85,7 +85,7 @@ def _a1_tab(tab: str) -> str:
     return "'" + str(tab).replace("'", "''") + "'"
 
 
-def ensure_columns(service, tab: str, header, mapping: dict) -> None:
+def ensure_columns(service, tab: str, header: list[str], mapping: dict) -> None:
     """Add any missing mapped columns AND write their headers.
 
     A column with no header is not a valid outcome, so every column this
