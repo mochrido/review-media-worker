@@ -49,14 +49,18 @@ def row_plan(rows, mapping) -> list[dict]:
         username = _cell(row, username_i)
         if not username:
             continue
-        status = _cell(row, status_i).upper()
-        if status == "DONE":
-            continue
 
+        # Folder cells are read and remembered BEFORE the skip test: a DONE row
+        # still anchors the fill-down for the rows below it. Skipping first
+        # would leave every continuation row with an empty folder on the
+        # resume run, which fails in a way retrying cannot clear.
         image_folder = _cell(row, image_folder_i) or last_image_folder
         video_folder = _cell(row, video_folder_i) or last_video_folder
         last_image_folder = image_folder or last_image_folder
         last_video_folder = video_folder or last_video_folder
+
+        if _cell(row, status_i).upper() == "DONE":
+            continue
 
         image_url = _cell(row, image_i)
         video_url = _cell(row, video_i)
@@ -132,7 +136,14 @@ def main():
     args = parser.parse_args()
 
     sheets_service, drive_service = _service()
-    mapping = config.parse_mapping(sheets.read_config(sheets_service))
+    try:
+        mapping = config.parse_mapping(sheets.read_config(sheets_service))
+    except config.ConfigError as exc:
+        # a bad _config value is the operator's to fix, so say so plainly
+        # rather than dying with a traceback in a CI log they may never read
+        print(f"_config is invalid: {exc}")
+        print("correct the _config tab in the sheet, then run again")
+        return 2
     tab = mapping["data_tab"]
 
     if bootstrap(sheets_service, tab, mapping):

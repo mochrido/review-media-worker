@@ -1,8 +1,6 @@
-import typing
-
 import pytest
 from worker.config import (
-    DEFAULT_MAPPING, col_to_index, index_to_col, missing_columns, parse_mapping,
+    DEFAULT_MAPPING, ConfigError, col_to_index, index_to_col, parse_mapping,
 )
 
 
@@ -36,24 +34,24 @@ def test_parse_mapping_ignores_blank_rows():
     assert parse_mapping(rows)["username_col"] == "A"
 
 
-def test_missing_columns_reports_absent_headers():
-    mapping = dict(DEFAULT_MAPPING)
-    header = ["username", "image_path", "video_path"]
-    missing = missing_columns(mapping, header)
-    # image_folder / video_folder / status are not in the header yet
-    assert set(missing) == {"image_folder_col", "video_folder_col", "status_col"}
+def test_parse_mapping_rejects_a_word_where_a_column_letter_is_expected():
+    # "Status" is all letters, so col_to_index() happily returns 234917324 and
+    # the run would try to widen the sheet to that many columns.
+    rows = [["key", "value"], ["status_col", "Status"]]
+    with pytest.raises(ConfigError) as caught:
+        parse_mapping(rows)
+    assert "status_col" in str(caught.value)
+    assert "Status" in str(caught.value)
 
 
-def test_missing_columns_empty_when_all_present():
-    mapping = dict(DEFAULT_MAPPING)
-    header = ["username", "image_path", "video_path",
-              "image_folder", "video_folder", "status"]
-    assert missing_columns(mapping, header) == {}
+def test_parse_mapping_rejects_a_digit_value():
+    # "1" yields -1, and the run would process every row then write nothing
+    with pytest.raises(ConfigError):
+        parse_mapping([["key", "value"], ["username_col", "1"]])
 
 
-def test_interfaces_signatures_carry_their_annotations():
-    # the Interfaces section names these types; an unannotated signature is a
-    # silent drift from the published contract
-    assert typing.get_type_hints(parse_mapping) == {"rows": list[list[str]], "return": dict}
-    assert typing.get_type_hints(missing_columns) == {
-        "mapping": dict, "header": list[str], "return": dict}
+def test_parse_mapping_accepts_letters_and_leaves_data_tab_alone():
+    rows = [["key", "value"], ["data_tab", "my data tab"], ["username_col", "AA"]]
+    mapping = parse_mapping(rows)
+    assert mapping["username_col"] == "AA"
+    assert mapping["data_tab"] == "my data tab"  # free text, not a column

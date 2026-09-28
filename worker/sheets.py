@@ -6,6 +6,8 @@ of API calls rather than one per row.
 
 import os
 
+from googleapiclient.errors import HttpError
+
 from worker.config import (
     DEFAULT_MAPPING, PROVISION_HEADERS, col_to_index, index_to_col,
 )
@@ -38,14 +40,22 @@ def read_rows(service, tab: str) -> list[list[str]]:
 
 
 def read_config(service) -> list[list[str]]:
-    """Read the _config tab. Returns [] when the tab does not exist yet."""
+    """Read the _config tab. Returns [] ONLY when the tab does not exist yet.
+
+    Every other failure is re-raised: swallowing a 5xx or a permissions error
+    here would be misread as "no _config", and the caller would then try to
+    create a tab that already exists.
+    """
     try:
         result = service.spreadsheets().values().get(
             spreadsheetId=spreadsheet_id(), range=f"{_a1_tab(CONFIG_TAB)}!A:B",
         ).execute()
         return result.get("values", [])
-    except Exception:
-        return []
+    except HttpError as exc:
+        status = getattr(getattr(exc, "resp", None), "status", None)
+        if status == 400:
+            return []  # "Unable to parse range" == the tab is not there
+        raise
 
 
 def read_header(service, tab: str) -> list[str]:
@@ -160,7 +170,9 @@ def write_statuses(service, tab: str, status_col_index: int, updates: dict) -> N
     payload = batch_status_payload(tab, status_col_index, updates)
     if not payload:
         return
+    # num_retries: this is the single end-of-run write, and a transient 5xx
+    # here would discard the record of a run that already did all its work
     service.spreadsheets().values().batchUpdate(
         spreadsheetId=spreadsheet_id(),
         body={"valueInputOption": "RAW", "data": payload},
-    ).execute()
+    ).execute(num_retries=3)

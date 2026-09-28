@@ -24,6 +24,9 @@ PROVISION_HEADERS = {
 }
 
 _LETTERS = re.compile(r"^[A-Z]+$")
+# A real column letter: at most three letters, which covers every column a
+# real sheet uses (XFD is the last). "Status" is not a column letter.
+_COLUMN_LETTER = re.compile(r"^[A-Za-z]{1,3}$")
 
 
 def col_to_index(letter: str) -> int:
@@ -56,6 +59,11 @@ def parse_mapping(rows: list[list[str]]) -> dict:
 
     Unknown keys are ignored; absent keys fall back to DEFAULT_MAPPING, so a
     partially-filled _config still yields a complete mapping.
+
+    Every `*_col` value is validated as a column letter. A typo would otherwise
+    become a six-figure index ('Status' -> 234917324) or an unusable -1, and
+    both fail in ways the operator cannot read: the run widens the sheet to an
+    absurd width, or processes every row and then writes nothing at all.
     """
     mapping = dict(DEFAULT_MAPPING)
     for row in rows or []:
@@ -67,20 +75,28 @@ def parse_mapping(rows: list[list[str]]) -> dict:
             continue
         if key in DEFAULT_MAPPING:
             mapping[key] = value
+    validate_mapping(mapping)
     return mapping
 
 
-def missing_columns(mapping: dict, header: list[str]) -> dict:
-    """Return {mapping_key: header_text} for mapped columns that are absent.
+class ConfigError(Exception):
+    """The _config tab holds a value that cannot work."""
 
-    Presence is judged by the column letter against the header row length.
+
+def validate_mapping(mapping: dict) -> None:
+    """Raise ConfigError naming the key and value that are wrong.
+
+    `data_tab` is free text; every other key must be a column letter. The check
+    is a shape check, not `col_to_index(...) >= 0`: that function happily reads
+    any run of letters, so "Status" would pass as column 234917324 and the run
+    would try to widen the sheet to that width. Real sheets stop at three
+    letters (ZZZ), so anything longer is a typo.
     """
-    missing = {}
-    width = len(header or [])
-    for key, header_text in PROVISION_HEADERS.items():
-        idx = col_to_index(mapping.get(key, ""))
-        if idx < 0:
+    for key, value in mapping.items():
+        if key == "data_tab":
             continue
-        if idx >= width:
-            missing[key] = header_text
-    return missing
+        if not _COLUMN_LETTER.match(str(value).strip()):
+            raise ConfigError(
+                f"{key} is {value!r}, which is not a column letter "
+                "(expected something like A, B or AA)"
+            )

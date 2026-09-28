@@ -1,7 +1,9 @@
 import pytest
 
 from worker.config import DEFAULT_MAPPING
-from worker.sheets import batch_status_payload, ensure_columns, write_statuses
+from worker.sheets import (
+    batch_status_payload, ensure_columns, read_config, write_statuses,
+)
 
 
 def test_batch_payload_collapses_contiguous_rows():
@@ -23,7 +25,9 @@ class _FakeRequest:
     def __init__(self, result=None):
         self._result = result if result is not None else {}
 
-    def execute(self):
+    def execute(self, **kwargs):
+        # the real client accepts num_retries; the fake must too, or it would
+        # hide a call the implementation actually makes
         return self._result
 
 
@@ -131,3 +135,80 @@ def test_write_statuses_escapes_an_apostrophe_in_the_tab_name():
     write_statuses(service, "Bob's Data", 5, {2: "DONE"})
     call = [c for c in service.log if c[0] == "values.batchUpdate"][0]
     assert call[1]["body"]["data"][0]["range"] == "'Bob''s Data'!F2"
+
+
+def _http_error(status):
+    """A real googleapiclient HttpError — it needs an httplib2.Response."""
+    import httplib2
+    from googleapiclient.errors import HttpError
+
+    response = httplib2.Response({"status": str(status)})
+    response.status = status
+    return HttpError(response, b"{}")
+
+
+def test_read_config_returns_empty_only_for_a_missing_tab():
+    # 400 "Unable to parse range" is how a missing tab shows up
+    class Missing:
+        def spreadsheets(self):
+            return self
+
+        def values(self):
+            return self
+
+        def get(self, **kwargs):
+            return self
+
+        def execute(self):
+            raise _http_error(400)
+
+    assert read_config(Missing()) == []
+
+
+def test_read_config_propagates_a_server_error():
+    # a 5xx must NOT look like "no _config", or the caller tries to create a
+    # tab that already exists
+    from googleapiclient.errors import HttpError
+
+    class Flaky:
+        def spreadsheets(self):
+            return self
+
+        def values(self):
+            return self
+
+        def get(self, **kwargs):
+            return self
+
+        def execute(self):
+            raise _http_error(503)
+
+    with pytest.raises(HttpError):
+        read_config(Flaky())
+
+
+def test_write_statuses_asks_the_client_to_retry():
+    # the final status write is the only record of a run that already did all
+    # its work, so it must be issued with retries. num_retries is an execute()
+    # argument, so the fake request captures it there.
+    seen = {}
+
+    class CapturingRequest(_FakeRequest):
+        def execute(self, **kwargs):
+            seen.update(kwargs)
+            return {}
+
+    class Svc(_FakeService):
+        def spreadsheets(self):
+            outer = self
+
+            class S(_FakeSpreadsheets):
+                def values(self_inner):
+                    class V(_FakeValues):
+                        def batchUpdate(self_v, **kwargs):
+                            return CapturingRequest()
+                    return V(outer.log)
+            return S(outer.log)
+
+    write_statuses(Svc(), "Sheet1", 5, {2: "DONE"})
+    assert seen.get("num_retries") == 3
