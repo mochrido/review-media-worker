@@ -38,6 +38,13 @@ The token is stored here, never in this repository — and this repository is pu
 
 Open the sheet, then **Media Manager → ☁️ Run Cloud Downloader**.
 
+That runs the workflow for real. To see what it *would* do without downloading
+or uploading anything, dispatch the workflow manually from the Actions tab and
+tick **dry_run** (equivalently, run the worker with `--dry-run`). A dry run
+prints the row count and, per row, whether it has an image and a video, then
+stops — so you can confirm the `_config` mapping before spending runner minutes
+or Vimeo quota.
+
 ## The `_config` tab
 
 The worker does not guess which column is which. It reads `_config` in the sheet:
