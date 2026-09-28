@@ -32,7 +32,7 @@ def _sheet_id(service, tab: str) -> int:
 
 def read_rows(service, tab: str) -> list[list[str]]:
     result = service.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id(), range=f"'{tab}'!A:ZZ",
+        spreadsheetId=spreadsheet_id(), range=f"{_a1_tab(tab)}!A:ZZ",
     ).execute()
     return result.get("values", [])
 
@@ -41,7 +41,7 @@ def read_config(service) -> list[list[str]]:
     """Read the _config tab. Returns [] when the tab does not exist yet."""
     try:
         result = service.spreadsheets().values().get(
-            spreadsheetId=spreadsheet_id(), range=f"'{CONFIG_TAB}'!A:B",
+            spreadsheetId=spreadsheet_id(), range=f"{_a1_tab(CONFIG_TAB)}!A:B",
         ).execute()
         return result.get("values", [])
     except Exception:
@@ -51,7 +51,7 @@ def read_config(service) -> list[list[str]]:
 def read_header(service, tab: str) -> list[str]:
     """The data tab's header row, or [] when the tab is empty."""
     result = service.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id(), range=f"'{tab}'!1:1",
+        spreadsheetId=spreadsheet_id(), range=f"{_a1_tab(tab)}!1:1",
     ).execute()
     rows = result.get("values", [])
     return rows[0] if rows else []
@@ -70,45 +70,59 @@ def create_config_tab(service, tab: str, mapping: dict) -> None:
     ).execute()
     rows = [["key", "value"]] + [[key, mapping[key]] for key in DEFAULT_MAPPING]
     service.spreadsheets().values().update(
-        spreadsheetId=spreadsheet_id(), range=f"'{CONFIG_TAB}'!A1:B{len(rows)}",
+        spreadsheetId=spreadsheet_id(), range=f"{_a1_tab(CONFIG_TAB)}!A1:B{len(rows)}",
         valueInputOption="RAW", body={"values": rows},
     ).execute()
 
 
-def ensure_columns(service, tab: str, header: list[str], mapping: dict) -> None:
+def _a1_tab(tab: str) -> str:
+    """Quote a tab name for A1 notation.
+
+    A tab whose name contains an apostrophe must have it doubled, e.g.
+    "Bob's Data" -> 'Bob''s Data'. Unescaped, the range is malformed and the
+    call fails for the whole run.
+    """
+    return "'" + str(tab).replace("'", "''") + "'"
+
+
+def ensure_columns(service, tab: str, header, mapping: dict) -> None:
     """Add any missing mapped columns AND write their headers.
 
-    A column with no header is not a valid outcome, so the header is written
-    in the same task as the widening. Idempotent: a column that already
-    exists is left alone.
+    A column with no header is not a valid outcome, so every column this
+    function physically creates gets its header written in the same run. The
+    grid is widened ONCE to the highest missing index, then a header is
+    written for every mapped column at or beyond the original width — writing
+    headers only for columns above the running width would silently create a
+    bare column whenever the mapping is not in ascending order.
     """
     width = len(header or [])
-    sheet_id = None
-    header_updates = []
+    targets = []
     for key, header_text in PROVISION_HEADERS.items():
         idx = col_to_index(mapping.get(key, ""))
-        if idx < 0 or idx < width:
-            continue  # absent from the mapping, or already present
-        if sheet_id is None:
-            sheet_id = _sheet_id(service, tab)
-        service.spreadsheets().batchUpdate(
-            spreadsheetId=spreadsheet_id(),
-            body={"requests": [{"appendDimension": {
-                "sheetId": sheet_id,
-                "dimension": "COLUMNS",
-                "length": idx + 1 - width,
-            }}]},
-        ).execute()
-        width = idx + 1
-        header_updates.append({
-            "range": f"'{tab}'!{index_to_col(idx)}1",
-            "values": [[header_text]],
-        })
-    if header_updates:
-        service.spreadsheets().values().batchUpdate(
-            spreadsheetId=spreadsheet_id(),
-            body={"valueInputOption": "RAW", "data": header_updates},
-        ).execute()
+        if idx >= 0:
+            targets.append((idx, header_text))
+    missing = sorted((idx, text) for idx, text in targets if idx >= width)
+    if not missing:
+        return  # every mapped column already exists
+
+    sheet_id = _sheet_id(service, tab)
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id(),
+        body={"requests": [{"appendDimension": {
+            "sheetId": sheet_id,
+            "dimension": "COLUMNS",
+            "length": missing[-1][0] + 1 - width,
+        }}]},
+    ).execute()
+
+    quoted = _a1_tab(tab)
+    service.spreadsheets().values().batchUpdate(
+        spreadsheetId=spreadsheet_id(),
+        body={"valueInputOption": "RAW", "data": [
+            {"range": f"{quoted}!{index_to_col(idx)}1", "values": [[text]]}
+            for idx, text in missing
+        ]},
+    ).execute()
 
 
 def batch_status_payload(tab: str, status_col_index: int, updates: dict) -> list[dict]:
@@ -136,7 +150,7 @@ def batch_status_payload(tab: str, status_col_index: int, updates: dict) -> list
 
 
 def _range(tab: str, letter: str, start: int, run: list) -> dict:
-    first = f"'{tab}'!{letter}{start}"
+    first = f"{_a1_tab(tab)}!{letter}{start}"
     last = f"{letter}{start + len(run) - 1}"
     span = first if len(run) == 1 else f"{first}:{last}"
     return {"range": span, "values": [[value] for value in run]}

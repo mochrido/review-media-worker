@@ -96,3 +96,38 @@ def test_ensure_columns_is_a_no_op_when_the_headers_already_exist():
     header = ["username", "image_path", "video_path", "image_folder", "video_folder", "status"]
     ensure_columns(service, "Sheet1", header, dict(DEFAULT_MAPPING))
     assert service.log == [], "existing columns must be left alone"
+
+def test_ensure_columns_writes_a_header_for_every_column_it_creates():
+    # the operator's rule: a column must never exist without its header.
+    # A mapping whose columns are NOT in ascending order used to create a bare
+    # column, because a header was only written when the index was still beyond
+    # the running grid width.
+    service = _FakeService()
+    header = ["username", "image_path", "video_path"]  # width 3
+    mapping = dict(DEFAULT_MAPPING)
+    mapping.update(image_folder_col="E", video_folder_col="D", status_col="H")
+
+    ensure_columns(service, "Sheet1", header, mapping)
+
+    written = [c for c in service.log if c[0] == "values.batchUpdate"][-1]
+    ranges = {d["range"]: d["values"][0][0] for d in written[1]["body"]["data"]}
+    assert ranges == {
+        "'Sheet1'!E1": "image_folder",
+        "'Sheet1'!D1": "video_folder",
+        "'Sheet1'!H1": "status",
+    }, "every mapped column must get its header, whatever the mapping order"
+
+
+def test_a1_tab_escapes_an_apostrophe_in_the_tab_name():
+    # "Bob's Data" is a legal tab name; interpolated raw it produces the
+    # malformed range 'Bob's Data'!A1 and the whole run fails
+    from worker.sheets import _a1_tab
+    assert _a1_tab("Bob's Data") == "'Bob''s Data'"
+    assert _a1_tab("Sheet1") == "'Sheet1'"
+
+
+def test_write_statuses_escapes_an_apostrophe_in_the_tab_name():
+    service = _FakeService()
+    write_statuses(service, "Bob's Data", 5, {2: "DONE"})
+    call = [c for c in service.log if c[0] == "values.batchUpdate"][0]
+    assert call[1]["body"]["data"][0]["range"] == "'Bob''s Data'!F2"
