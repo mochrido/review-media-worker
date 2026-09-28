@@ -5,3 +5,4 @@ __pycache__/
 !tests/fixtures/*.json
 .env
 downloads/
+tests/_media_fixtures/

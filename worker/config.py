@@ -51,7 +51,7 @@ def index_to_col(index: int) -> str:
     return out
 
 
-def parse_mapping(rows) -> dict:
+def parse_mapping(rows: list[list[str]]) -> dict:
     """Read the _config tab: a `key`/`value` header plus one row per key.
 
     Unknown keys are ignored; absent keys fall back to DEFAULT_MAPPING, so a
@@ -70,7 +70,7 @@ def parse_mapping(rows) -> dict:
     return mapping
 
 
-def missing_columns(mapping: dict, header) -> dict:
+def missing_columns(mapping: dict, header: list[str]) -> dict:
     """Return {mapping_key: header_text} for mapped columns that are absent.
 
     Presence is judged by the column letter against the header row length.

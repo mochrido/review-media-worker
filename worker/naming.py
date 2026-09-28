@@ -11,6 +11,7 @@ import re
 
 _ALLOWED = re.compile(r"[^A-Za-z0-9._-]")
 _IMAGE_EXT = re.compile(r"\.([A-Za-z0-9]{2,5})$")
+_MAX_STEM = 200  # Drive and ext4 cap names at 255; leave room for ".mp4"
 
 
 def safe_username(raw: str) -> str:
@@ -26,7 +27,7 @@ def safe_username(raw: str) -> str:
     cleaned = _ALLOWED.sub("", str(raw).strip()).strip(".-")
     if not cleaned:
         return "user"
-    return cleaned
+    return cleaned[:_MAX_STEM]
 
 
 def image_filename(username: str, url: str) -> str:

@@ -14,7 +14,7 @@ class ImageError(Exception):
     """A recoverable per-row image failure."""
 
 
-def fetch_image(url: str, session):
+def fetch_image(url: str, session) -> tuple[bytes, str]:
     """Fetch an image. Returns (data, mime). Raises ImageError on failure."""
     if not url:
         raise ImageError("empty image URL")

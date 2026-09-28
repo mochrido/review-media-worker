@@ -15,6 +15,9 @@ def test_folder_id_from_url(url, expected):
     "",
     "not a url",
     "https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/view",
+    # a FILE link that ALSO carries ?id= is the only input where the file-guard
+    # changes the outcome — without it, the ?id= branch would accept a file
+    "https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/view?id=1XyZaBcDeFgHiJkLmNoPqRsTuVwXyZ012345",
 ])
 def test_folder_id_from_url_rejects_non_folders(bad):
     with pytest.raises(ValueError):

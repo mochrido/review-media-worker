@@ -27,3 +27,10 @@ def test_error_status_is_prefixed_and_truncated():
     out = error_status("x" * 500)
     assert out.startswith("ERROR: ")
     assert len(out) <= 200
+
+
+def test_error_status_strips_urls():
+    # a requests/Drive exception message embeds the URL; the status cell must not
+    out = error_status("image fetch failed: 404 for url: https://assets.example.com/a/b.jpeg")
+    assert "https://" not in out
+    assert "<url>" in out

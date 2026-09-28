@@ -33,3 +33,18 @@ def test_image_filename_strips_query_and_hash():
 
 def test_image_filename_defaults_when_no_extension():
     assert image_filename("bob", "https://x.test/noext") == "bob.jpg"
+
+
+def test_safe_username_caps_length():
+    # Drive and ext4 cap a name at 255 bytes; a very long username must not
+    # produce a filename the upload will reject.
+    out = safe_username("a" * 500)
+    assert len(out) == 200
+    assert len(video_filename("a" * 500)) <= 255
+
+
+def test_image_filename_keeps_a_sane_extension_for_long_stems():
+    url = "https://x.test/a.jpeg"
+    out = image_filename("a" * 500, url)
+    assert out.endswith(".jpeg")
+    assert len(out) <= 255

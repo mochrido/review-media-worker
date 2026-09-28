@@ -1,3 +1,5 @@
+import typing
+
 import pytest
 from worker.config import (
     DEFAULT_MAPPING, col_to_index, index_to_col, missing_columns, parse_mapping,
@@ -47,3 +49,11 @@ def test_missing_columns_empty_when_all_present():
     header = ["username", "image_path", "video_path",
               "image_folder", "video_folder", "status"]
     assert missing_columns(mapping, header) == {}
+
+
+def test_interfaces_signatures_carry_their_annotations():
+    # the Interfaces section names these types; an unannotated signature is a
+    # silent drift from the published contract
+    assert typing.get_type_hints(parse_mapping) == {"rows": list[list[str]], "return": dict}
+    assert typing.get_type_hints(missing_columns) == {
+        "mapping": dict, "header": list[str], "return": dict}

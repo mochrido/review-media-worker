@@ -16,7 +16,7 @@ import subprocess
 from worker.status import RESTRICTED, error_status
 
 _VIMEO_HOST = re.compile(r"^https?://(?:www\.|player\.)?vimeo\.com/", re.I)
-_VIMEO_ID = re.compile(r"vimeo\.com/(?:video/)?(\d+)", re.I)
+_VIMEO_ID = re.compile(r"^https?://(?:www\.|player\.)?vimeo\.com/(?:video/)?(\d+)", re.I)
 
 # Prefer a muxed mp4; fall back to best video+audio merged into mp4.
 FORMAT_SELECTOR = "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b"
@@ -55,8 +55,12 @@ def classify_failure(stderr: str) -> str:
     text = str(stderr or "")
     if "HTTP Error 401" in text or "401 Unauthorized" in text:
         return RESTRICTED
-    # keep the first meaningful line, without echoing the URL
-    line = next((l.strip() for l in text.splitlines() if l.strip()), "download failed")
+    # yt-dlp's own message already begins "ERROR:"; take that line rather than
+    # the first non-blank one, which is often just a WARNING.
+    line = next((l.strip() for l in text.splitlines() if l.strip().startswith("ERROR:")), None)
+    if line is None:
+        line = next((l.strip() for l in text.splitlines() if l.strip()), "download failed")
+    line = line[len("ERROR:"):].strip() if line.startswith("ERROR:") else line
     line = re.sub(r"https?://\S+", "<url>", line)
     return error_status(line)
 
@@ -64,7 +68,7 @@ def classify_failure(stderr: str) -> str:
 def download_video(url: str, workdir: str) -> str:
     """Download and mux. Returns the path to the mp4. Raises VideoError."""
     if not is_vimeo_url(url):
-        raise VideoError("not a Vimeo URL")
+        raise VideoError(error_status("not a Vimeo URL"))
     out_path = os.path.join(workdir, "video.%(ext)s")
     command = build_command(url, out_path)
     result = subprocess.run(command, capture_output=True, text=True, timeout=TIMEOUT_SECONDS)
@@ -78,17 +82,20 @@ def download_video(url: str, workdir: str) -> str:
 
 
 def has_audio(path: str) -> bool:
-    """True when the file carries an audio stream.
+    """True when the file carries BOTH a video and an audio stream.
 
-    A silent file must never be reported DONE, so this is checked before
-    upload rather than trusted.
+    The spec's rule is "every video must report both a video and an audio
+    stream before upload; a silent file is never DONE" — so checking audio
+    alone is not enough. A file that muxed into audio-only is just as broken
+    as one that came out silent.
     """
     result = subprocess.run(
-        ["ffprobe", "-v", "error", "-select_streams", "a",
-         "-show_entries", "stream=codec_type", "-of", "csv=p=0", path],
+        ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type",
+         "-of", "csv=p=0", path],
         capture_output=True, text=True, timeout=120,
     )
-    return result.returncode == 0 and "audio" in result.stdout
+    kinds = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    return result.returncode == 0 and "video" in kinds and "audio" in kinds
 
 
 class VideoError(Exception):
