@@ -1,0 +1,54 @@
+name: process-media
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report the plan without downloading"
+        type: boolean
+        default: false
+
+concurrency:
+  group: process-media
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # ffmpeg must be installed BEFORE the tests: the has_audio guard shells
+      # out to ffprobe, and its tests generate real fixtures with ffmpeg.
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install yt-dlp
+
+      - name: Verify tools
+        run: |
+          ffmpeg -version | head -1
+          yt-dlp --version
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Process media
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            python -m worker.main --dry-run
+          else
+            python -m worker.main
+          fi
