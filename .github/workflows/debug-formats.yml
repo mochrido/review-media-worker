@@ -1,0 +1,59 @@
+name: debug-formats
+
+# TEMPORARY diagnostic. Prints the formats yt-dlp sees for one video and
+# simulates candidate format selectors, so the real selector is chosen from
+# evidence rather than guesswork. Deleted once the fix lands.
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Vimeo player URL to inspect"
+        required: true
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          pip install -r /dev/null || true
+          pip install "yt-dlp==2025.9.26"
+          yt-dlp --version
+
+      - name: List available formats
+        run: |
+          echo "::group::FORMATS"
+          yt-dlp --no-warnings --no-playlist -F "${{ inputs.url }}" || true
+          echo "::endgroup::"
+
+      - name: Show the raw info's format table
+        run: |
+          echo "::group::JSON"
+          yt-dlp --no-warnings --no-playlist -J "${{ inputs.url }}" \
+            | python -c "import json,sys; d=json.load(sys.stdin); [print(f['format_id'], f.get('ext'), f.get('vcodec'), f.get('acodec'), f.get('protocol')) for f in d.get('formats',[])]" \
+            || true
+          echo "::endgroup::"
+
+      - name: Simulate candidate selectors
+        run: |
+          for sel in \
+            'bv*[ext=mp4]+ba[ext=m4a]' \
+            'bv*+ba/b' \
+            'bv*[vcodec^=avc1]+ba[acodec^=mp4a]' \
+            'bv*[vcodec^=avc1]+ba[acodec^=mp4a]/bv*+ba/b' \
+            'b[ext=mp4]/b'
+          do
+            echo "::group::SELECTOR $sel"
+            if yt-dlp --no-warnings --no-playlist --simulate --merge-output-format mp4 -f "$sel" "${{ inputs.url }}" 2>&1; then
+              echo "RESULT: OK -> $sel"
+            else
+              echo "RESULT: FAILED -> $sel"
+            fi
+            echo "::endgroup::"
+          done
