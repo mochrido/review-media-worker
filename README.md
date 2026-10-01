@@ -17,11 +17,24 @@ In **Settings → Secrets and variables → Actions**:
 
 | Secret | What it is |
 |---|---|
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | The full service-account key JSON |
+| `GOOGLE_OAUTH_CLIENT_ID` | OAuth client id |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | OAuth client secret |
+| `GOOGLE_OAUTH_REFRESH_TOKEN` | Refresh token for the operator's own Google account |
 | `SPREADSHEET_ID` | The ID from the sheet's URL |
 
-The service account needs **Editor** on the sheet and **write** access to every
-destination folder. Sharing a parent folder covers its subfolders.
+The worker acts **as a real user account, not a service account**. A service
+account has zero Drive storage quota, so uploading into a folder in someone's
+My Drive always fails with *"Service Accounts do not have storage quota"*,
+however the folder is shared. The account above needs **write** access to every
+destination folder; sharing a parent folder covers its subfolders.
+
+To mint the refresh token with Drive + Sheets scope:
+
+```
+uv run --with google-auth-oauthlib python -m google_auth_oauthlib.tools.run_flow \
+  --client-secrets client_secret.json --scopes \
+  https://www.googleapis.com/auth/drive,https://www.googleapis.com/auth/spreadsheets
+```
 
 ### 2. Apps Script properties
 
