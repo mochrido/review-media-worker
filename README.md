@@ -51,6 +51,11 @@ The token is stored here, never in this repository — and this repository is pu
 
 Open the sheet, then **Media Manager → ☁️ Run Cloud Downloader**.
 
+Everyday users should read the **INSTRUCTION** tab in the spreadsheet — it is the
+operator-facing guide (what each column means, what every status says, how to add
+more reviews, and what to do when a row errors). This README is the maintainer's
+view: setup, credentials, and the internals.
+
 That runs the workflow for real. To see what it *would* do without downloading
 or uploading anything, dispatch the workflow manually from the Actions tab and
 tick **dry_run** (equivalently, run the worker with `--dry-run`). A dry run
