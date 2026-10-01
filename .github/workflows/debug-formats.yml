@@ -40,20 +40,29 @@ jobs:
             || true
           echo "::endgroup::"
 
-      - name: Simulate candidate selectors
+      - name: Download with the shipped selector
         run: |
-          for sel in \
-            'bv*[ext=mp4]+ba[ext=m4a]' \
-            'bv*+ba/b' \
-            'bv*[vcodec^=avc1]+ba[acodec^=mp4a]' \
-            'bv*[vcodec^=avc1]+ba[acodec^=mp4a]/bv*+ba/b' \
-            'b[ext=mp4]/b'
-          do
-            echo "::group::SELECTOR $sel"
-            if yt-dlp --no-warnings --no-playlist --simulate --merge-output-format mp4 -f "$sel" "${{ inputs.url }}" 2>&1; then
-              echo "RESULT: OK -> $sel"
-            else
-              echo "RESULT: FAILED -> $sel"
-            fi
-            echo "::endgroup::"
-          done
+          set -x
+          yt-dlp --no-warnings --no-playlist --force-ipv4 \
+            -f 'bv*[vcodec^=avc1]+ba[acodec^=mp4a]/bv*+ba/b' \
+            --merge-output-format mp4 \
+            -o 'out.%(ext)s' "${{ inputs.url }}"
+          ls -la out.*
+
+      - name: Verify BOTH streams are present
+        run: |
+          echo "::group::STREAMS"
+          ffprobe -v error -show_entries stream=codec_type,codec_name \
+            -of csv=p=0 out.mp4
+          echo "::endgroup::"
+          kinds=$(ffprobe -v error -show_entries stream=codec_type -of csv=p=0 out.mp4 | sort -u | tr '\n' ' ')
+          echo "kinds: $kinds"
+          case "$kinds" in
+            *video*audio*) echo "RESULT: BOTH STREAMS PRESENT" ;;
+            *) echo "RESULT: MISSING A STREAM -> $kinds"; exit 1 ;;
+          esac
+
+      - name: Report size and duration
+        run: |
+          ls -l out.mp4
+          ffprobe -v error -show_entries format=duration,size -of default=nw=1 out.mp4

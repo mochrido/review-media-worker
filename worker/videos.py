@@ -18,8 +18,13 @@ from worker.status import RESTRICTED, error_status
 _VIMEO_HOST = re.compile(r"^https?://(?:www\.|player\.)?vimeo\.com/", re.I)
 _VIMEO_ID = re.compile(r"^https?://(?:www\.|player\.)?vimeo\.com/(?:video/)?(\d+)", re.I)
 
-# Prefer a muxed mp4; fall back to best video+audio merged into mp4.
-FORMAT_SELECTOR = "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b"
+# Vimeo serves these as separate HLS renditions (m3u8), so there is no m4a
+# audio track to claim: audio is `hls-...-audio-high-Original` and video is
+# `hls-<cdn>-<bitrate>`. Matching on [ext=m4a] therefore matched nothing and
+# every row failed with "Requested format is not available".
+# Measured on the real player page: bv*+ba/b works; the avc1/mp4a preference is
+# kept so the mux lands on h264+aac rather than whatever the CDN lists first.
+FORMAT_SELECTOR = "bv*[vcodec^=avc1]+ba[acodec^=mp4a]/bv*+ba/b"
 TIMEOUT_SECONDS = 600
 
 
