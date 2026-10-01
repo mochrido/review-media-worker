@@ -5,13 +5,11 @@ never aborts the run.
 """
 
 import argparse
-import json
 import os
 import sys
 import tempfile
 
 import requests
-from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
@@ -79,30 +77,22 @@ def row_plan(rows, mapping) -> list[dict]:
 
 
 def _service():
-    """Sheets + Drive clients.
+    """Sheets + Drive clients, acting as the operator's own account.
 
-    Two credential shapes are supported, and the choice matters:
-
-    * User OAuth (GOOGLE_OAUTH_CLIENT_ID + GOOGLE_OAUTH_CLIENT_SECRET +
-      GOOGLE_OAUTH_REFRESH_TOKEN) — the worker acts as a real person. Use this.
-    * A service-account key (GOOGLE_SERVICE_ACCOUNT_JSON) — only usable when
-      files land in a Shared Drive. A service account has ZERO Drive storage
-      quota, so uploading to a folder in someone's My Drive always fails with
-      "Service Accounts do not have storage quota", however the folder is
-      shared. Kept so a Shared Drive deployment stays possible.
+    User OAuth, not a service account: a service account has ZERO Drive
+    storage quota, so uploading to a folder in someone's My Drive always fails
+    with "Service Accounts do not have storage quota", however the folder is
+    shared. Verified against the live API (storageQuota.limit = 0 for the
+    service account, 159TB for the user).
     """
-    if os.environ.get("GOOGLE_OAUTH_REFRESH_TOKEN"):
-        credentials = Credentials(
-            token=None,
-            refresh_token=os.environ["GOOGLE_OAUTH_REFRESH_TOKEN"],
-            token_uri="https://oauth2.googleapis.com/token",
-            client_id=os.environ["GOOGLE_OAUTH_CLIENT_ID"],
-            client_secret=os.environ["GOOGLE_OAUTH_CLIENT_SECRET"],
-            scopes=SCOPES,
-        )
-    else:
-        info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
-        credentials = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+    credentials = Credentials(
+        token=None,
+        refresh_token=os.environ["GOOGLE_OAUTH_REFRESH_TOKEN"],
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=os.environ["GOOGLE_OAUTH_CLIENT_ID"],
+        client_secret=os.environ["GOOGLE_OAUTH_CLIENT_SECRET"],
+        scopes=SCOPES,
+    )
     return (build("sheets", "v4", credentials=credentials),
             build("drive", "v3", credentials=credentials))
 

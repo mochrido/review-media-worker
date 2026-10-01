@@ -5,7 +5,7 @@ import pytest
 
 from worker.videos import (
     FORMAT_SELECTOR, VideoError, build_command, classify_failure, download_video,
-    has_audio, is_vimeo_url, vimeo_id,
+    has_audio, is_vimeo_url,
 )
 
 
@@ -17,12 +17,6 @@ from worker.videos import (
 ])
 def test_is_vimeo_url(url, ok):
     assert is_vimeo_url(url) is ok
-
-
-def test_vimeo_id_extracts_digits():
-    assert vimeo_id("https://player.vimeo.com/video/1178320400") == "1178320400"
-    assert vimeo_id("https://vimeo.com/1178320400") == "1178320400"
-    assert vimeo_id("https://example.com/x") is None
 
 
 def test_build_command_prefers_muxed_mp4_and_forces_mp4_container():
@@ -150,4 +144,3 @@ def test_is_vimeo_url_rejects_a_lookalike_host():
     # the ID regex is anchored to the vimeo host, so a host that merely has
     # "vimeo.com" in its path is not a Vimeo URL
     assert is_vimeo_url("https://evil.test/vimeo.com/12345") is False
-    assert vimeo_id("https://evil.test/vimeo.com/12345") is None

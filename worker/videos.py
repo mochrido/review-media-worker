@@ -16,7 +16,6 @@ import subprocess
 from worker.status import RESTRICTED, error_status
 
 _VIMEO_HOST = re.compile(r"^https?://(?:www\.|player\.)?vimeo\.com/", re.I)
-_VIMEO_ID = re.compile(r"^https?://(?:www\.|player\.)?vimeo\.com/(?:video/)?(\d+)", re.I)
 
 # Vimeo serves these as separate HLS renditions (m3u8), so there is no m4a
 # audio track to claim: audio is `hls-...-audio-high-Original` and video is
@@ -30,13 +29,6 @@ TIMEOUT_SECONDS = 600
 
 def is_vimeo_url(url: str) -> bool:
     return bool(url) and bool(_VIMEO_HOST.match(str(url).strip()))
-
-
-def vimeo_id(url: str):
-    match = _VIMEO_ID.search(str(url or ""))
-    return match.group(1) if match else None
-
-
 def build_command(url: str, out_path: str):
     """The exact yt-dlp invocation. Kept pure so it is unit-testable."""
     return [
